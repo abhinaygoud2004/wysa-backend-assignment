@@ -1,0 +1,851 @@
+Wysa Assignment Code Explanation
+Detailed line-by-line explanation for services, models, and tests
+
+========================================================================
+1. FILE: Backend/src/services/moduleService.js
+========================================================================
+
+Line 1:
+`const Module = require('../models/Module');`
+This imports the Mongoose model for modules. The service needs it so it can read module documents from MongoDB.
+
+Line 2:
+Blank line for readability. It separates imports from function declarations.
+
+Line 3:
+`async function getModule(moduleId) {`
+This declares an asynchronous helper function named `getModule`. It accepts a `moduleId` string and returns the module document if it exists.
+
+Line 4:
+`const moduleDoc = await Module.findById(moduleId);`
+This queries MongoDB for a document in the `modules` collection whose `_id` matches `moduleId`. `await` pauses execution until the database returns a result.
+
+Line 5:
+Blank line for readability.
+
+Line 6:
+`if (!moduleDoc) {`
+This checks whether the module was found. If `findById` returned `null`, the module does not exist.
+
+Line 7:
+`const error = new Error(\`Module "${moduleId}" not found\`);`
+This creates a JavaScript `Error` object with a clear message containing the missing module id.
+
+Line 8:
+`error.statusCode = 404;`
+This adds a custom property used by the global error handler so the API responds with HTTP 404 instead of HTTP 500.
+
+Line 9:
+`throw error;`
+This stops the function immediately and passes the error upward to the controller/middleware.
+
+Line 10:
+`}`
+Ends the `if` block.
+
+Line 11:
+Blank line for readability.
+
+Line 12:
+`return moduleDoc;`
+If the module exists, it is returned to the caller.
+
+Line 13:
+`}`
+Ends the `getModule` function.
+
+Line 14:
+Blank line for readability.
+
+Line 15:
+`function getQuestion(moduleDoc, questionId) {`
+This declares a synchronous helper that finds a specific question inside an already loaded module document.
+
+Line 16:
+`const question = moduleDoc.findQuestion(questionId);`
+This calls the custom instance method defined on the `Module` schema. That method searches the embedded `questions` array for a matching question id.
+
+Line 17:
+Blank line for readability.
+
+Line 18:
+`if (!question) {`
+Checks whether the requested question exists inside the given module.
+
+Line 19:
+`const error = new Error(`
+Starts construction of a detailed error message.
+
+Line 20:
+`` `Question "${questionId}" not found in module "${moduleDoc._id}"` ``
+The message tells exactly which question id and module id caused the failure.
+
+Line 21:
+`);`
+Finishes the error constructor call.
+
+Line 22:
+`error.statusCode = 404;`
+Marks this as a not-found API error.
+
+Line 23:
+`throw error;`
+Throws the error so the request fails clearly instead of continuing with invalid data.
+
+Line 24:
+`}`
+Ends the `if` block.
+
+Line 25:
+Blank line for readability.
+
+Line 26:
+`return question;`
+Returns the found question object if it exists.
+
+Line 27:
+`}`
+Ends the `getQuestion` function.
+
+Line 28:
+Blank line for readability.
+
+Line 29:
+`function getOption(question, optionId) {`
+This declares another helper, this time for finding a selected option inside a question.
+
+Line 30:
+`const option = question.options.find((entry) => entry.id === optionId);`
+This loops through the `options` array and returns the first option whose `id` matches the submitted `optionId`.
+
+Line 31:
+Blank line for readability.
+
+Line 32:
+`if (!option) {`
+Checks whether the provided option id is valid for this question.
+
+Line 33:
+`const error = new Error(`
+Starts creating a validation error.
+
+Line 34:
+`` `Option "${optionId}" is not valid for question "${question.id}". Valid options: [${question.options` ``
+Builds the first half of the error message. It includes the bad option id and the question id.
+
+Line 35:
+`.map((entry) => entry.id)`
+Extracts all valid option ids from the question’s option list.
+
+Line 36:
+`.join(', ')}]``
+Joins those valid ids into a readable comma-separated list and closes the message string.
+
+Line 37:
+`);`
+Finishes the error constructor call.
+
+Line 38:
+`error.statusCode = 400;`
+Marks this as a bad request because the client submitted invalid input.
+
+Line 39:
+`throw error;`
+Stops execution and returns the error through middleware.
+
+Line 40:
+`}`
+Ends the validation block.
+
+Line 41:
+Blank line for readability.
+
+Line 42:
+`return option;`
+Returns the valid option object.
+
+Line 43:
+`}`
+Ends the `getOption` function.
+
+Line 44:
+Blank line for readability.
+
+Line 45:
+`module.exports = {`
+Starts exporting the helper functions from this file.
+
+Lines 46-48:
+`getModule, getOption, getQuestion,`
+These three functions are made available to other files, especially `flowService.js`.
+
+Line 49:
+`};`
+Ends the export object.
+
+========================================================================
+2. FILE: Backend/src/services/flowService.js
+========================================================================
+
+Line 1:
+`const ConversationHistory = require('../models/ConversationHistory');`
+Imports the history model so answers can be stored permanently.
+
+Line 2:
+`const UserState = require('../models/UserState');`
+Imports the model that stores the user’s active state inside each module.
+
+Line 3:
+`const { getModule, getOption, getQuestion } = require('./moduleService');`
+Imports the validation helpers from `moduleService`.
+
+Line 4:
+Blank line for readability.
+
+Line 5:
+`async function startModule(userId, moduleId) {`
+Declares the function that starts or resumes a module for a user.
+
+Line 6:
+`const moduleDoc = await getModule(moduleId);`
+Loads the module first. If the module is missing, `getModule` throws.
+
+Line 7:
+Blank line.
+
+Lines 8-20:
+`const state = await UserState.findOneAndUpdate(...);`
+This is the key state initialization query.
+- It searches for an existing state row using `{ userId, moduleId }`.
+- If one does not exist, `$setOnInsert` creates it.
+- `currentQuestionId` is initialized to the module’s `entryQuestionId`.
+- `checkpointQuestionId` starts as `null` because the user has not passed any checkpoint yet.
+- `questionStack` starts empty because the user has no back history yet.
+- `upsert: true` means “update if found, insert if not found.”
+- `new: true` means “return the resulting document after the update/insert.”
+
+Line 22:
+`if (state.currentQuestionId === null) {`
+Checks if the module has already been completed for this user. In this codebase, completion is represented by `currentQuestionId = null`.
+
+Line 23:
+`return { flowComplete: true, moduleDoc, question: null, state };`
+Returns a completed state instead of restarting the flow from the beginning.
+
+Line 24:
+`}`
+Ends the completion check.
+
+Line 26:
+`const activeQuestionId = state.currentQuestionId || moduleDoc.entryQuestionId;`
+Normally `state.currentQuestionId` should already exist here. The fallback to `entryQuestionId` is an extra safety measure.
+
+Line 27:
+`const question = getQuestion(moduleDoc, activeQuestionId);`
+Finds the current active question in the module.
+
+Line 29:
+`return { flowComplete: false, moduleDoc, question, state };`
+Returns the module, the question to show, the state, and a flag that the flow is not complete.
+
+Line 30:
+Ends `startModule`.
+
+Line 32:
+`async function getCurrentQuestion(userId, moduleId, requestedQuestionId = null) {`
+Declares the function that resolves a user’s latest valid question, especially useful for deep links.
+
+Line 33:
+Loads the module using `getModule`.
+
+Lines 35-44:
+Looks for an existing state row. If no state exists yet, creates one automatically with the module’s entry question as the current question.
+
+Line 46:
+`if (state.currentQuestionId === null) {`
+If the user has completed the module, there is no active question to return.
+
+Lines 47-52:
+Returns `flowComplete: true`, `question: null`, and marks `staleLinkResolved` true if the client tried to deep-link into some old question.
+
+Line 55:
+`let resolvedQuestionId = state.currentQuestionId;`
+Starts with the current active question stored in the database.
+
+Line 56:
+`if (resolvedQuestionId && !moduleDoc.findQuestion(resolvedQuestionId)) {`
+This is a defensive check. It handles the case where module content was changed and the state now points to a question that no longer exists.
+
+Line 57:
+`resolvedQuestionId = moduleDoc.entryQuestionId;`
+If the stored current question is invalid, reset to the module entry question as a safe fallback.
+
+Lines 58-61:
+Persist that repair in the database so the invalid question id is not reused.
+
+Line 64:
+`let staleLinkResolved = false;`
+Starts with the assumption that there is no stale link issue.
+
+Line 65:
+`if (requestedQuestionId && requestedQuestionId !== resolvedQuestionId) {`
+If the client explicitly requested some question id and it is not the current valid one, the deep link is stale.
+
+Line 66:
+`staleLinkResolved = true;`
+Marks that the API corrected the stale deep link.
+
+Lines 69-74:
+Returns the current valid question plus `staleLinkResolved`.
+
+Line 77:
+`async function submitAnswer(userId, moduleId, questionId, optionId) {`
+Declares the main state transition function for the conversation flow.
+
+Line 78:
+Loads the module.
+
+Line 79:
+Loads the user’s current state for that module.
+
+Lines 81-87:
+If there is no state row, the user never started this module. The function throws a 404 instead of guessing.
+
+Lines 89-95:
+If `currentQuestionId === null`, the module is already completed. The function rejects new answers with a 400.
+
+Lines 97-103:
+If the submitted `questionId` is not the current active question, the function throws HTTP 409. This prevents stale answers and enforces real active state.
+
+Line 105:
+Finds the current question object.
+
+Line 106:
+Finds the selected option object and validates that it belongs to the current question.
+
+Lines 107-109:
+Builds the next back-navigation stack.
+- If the current question is a checkpoint, older module context should stop affecting future flow, so the stack resets to just this checkpoint question.
+- Otherwise the current question is appended to the existing stack.
+
+Lines 111-118:
+Writes a new `ConversationHistory` row.
+- This is append-only permanent history.
+- It stores both ids and human-readable text.
+
+Lines 120-128:
+If the current question is a checkpoint, update the `UserState` checkpoint marker and reset the stack to that checkpoint.
+
+Line 130:
+`if (option.nextModuleId) {`
+Starts the branch for cross-module switching.
+
+Line 131:
+Loads the target module.
+
+Lines 132-133:
+Decides the entry question for the target module.
+- If the option explicitly specifies `nextModuleEntryQuestionId`, use it.
+- Otherwise use the target module’s default `entryQuestionId`.
+
+Line 134:
+`const entryQuestion = nextModule.findQuestion(entryQuestionId);`
+Checks that the target entry question really exists.
+
+Lines 136-142:
+If the entry question does not exist, throw a 500 because the module graph is broken.
+
+Lines 144-156:
+Upserts a `UserState` for the target module.
+- If the user is visiting that module for the first time, create a new target state.
+- If the user has been there before, return the existing state.
+
+Line 158:
+`let targetQuestion = entryQuestion;`
+Initial assumption: show the normal target entry question.
+
+Lines 160-161:
+If the target module already has saved progress and its current question is different from the entry question, resume that saved question instead of forcing the entry.
+
+Lines 162-170:
+If the target module had previously been completed (`currentQuestionId === null`), reset it to the target entry question so the module can be started again intentionally.
+
+Lines 173-178:
+Return the target module and target question with `switchedModule: true`.
+
+Line 181:
+`if (!option.nextQuestionId) {`
+This means the option does not point to another question in the same module and does not switch modules either. So this answer ends the module.
+
+Lines 182-188:
+Updates the user state so `currentQuestionId` becomes `null`, marking module completion. It also preserves the computed `questionStack`.
+
+Lines 190-195:
+Returns a flow-complete response with no next question.
+
+Line 198:
+`const nextQuestion = moduleDoc.findQuestion(option.nextQuestionId);`
+For normal same-module progression, find the next question in the current module.
+
+Lines 199-205:
+If the referenced next question does not exist, throw a 500 because the module data is broken.
+
+Lines 207-216:
+Update the current module state:
+- `currentQuestionId` becomes the next question’s id
+- `checkpointQuestionId` is updated if the current question was a checkpoint
+- `questionStack` becomes the new stack computed earlier
+
+Lines 218-223:
+Returns the next question for normal same-module progression.
+
+Line 226:
+`async function getHistory(userId, moduleId = null) {`
+Declares the history retrieval function.
+
+Line 227:
+Creates a base filter using just `userId`.
+
+Lines 229-231:
+If a `moduleId` filter was provided, add it to the query filter.
+
+Line 233:
+Runs the query, sorts the history in ascending time order, and returns plain JavaScript objects using `.lean()`.
+
+Line 236:
+`async function goBack(userId, moduleId) {`
+Declares the bonus feature that moves the user back to the previous question in the current module state.
+
+Line 237:
+Loads the module.
+
+Line 238:
+Loads the user’s state for this module.
+
+Lines 240-246:
+If there is no state, no stack, or an empty stack, the user is already at the earliest valid question in current module state, so going back is not allowed.
+
+Line 248:
+`const previousQuestionId = state.questionStack[state.questionStack.length - 1];`
+Gets the most recent previous question from the back stack.
+
+Line 249:
+Finds the actual question object in the module.
+
+Lines 251-257:
+If that previous question id no longer exists in the module, throw a 500 because the stored state no longer matches the module content.
+
+Lines 259-265:
+Update the state so:
+- `currentQuestionId` becomes the previous question
+- `questionStack` drops its last item using `slice(0, -1)`
+
+Line 267:
+Returns the restored question.
+
+Lines 270-276:
+Exports all service functions for use by controllers.
+
+========================================================================
+3. FILE: Backend/src/models/Module.js
+========================================================================
+
+Line 1:
+Imports `mongoose` so schemas and models can be defined.
+
+Line 3:
+`const OptionSchema = new mongoose.Schema(`
+Begins the embedded schema for each option inside a question.
+
+Lines 4-10:
+Define the option fields:
+- `id`: custom string id for the option
+- `text`: text shown to the user
+- `nextQuestionId`: next question in the same module
+- `nextModuleId`: target module if this option switches modules
+- `nextModuleEntryQuestionId`: entry question in the target module
+
+Line 11:
+`{ _id: false }`
+Disables Mongoose’s automatic `_id` for embedded option documents because the app already uses custom `id` fields.
+
+Line 12:
+Ends `OptionSchema`.
+
+Line 14:
+Begins the embedded schema for each question.
+
+Lines 15-20:
+Define question fields:
+- `id`: custom string id
+- `text`: question text
+- `isCheckpoint`: whether this question resets prior module context
+- `options`: array of `OptionSchema`
+
+Line 21:
+`{ _id: false }`
+Again disables auto `_id` for embedded question documents.
+
+Line 22:
+Ends `QuestionSchema`.
+
+Line 24:
+Begins the top-level module schema.
+
+Lines 25-30:
+Define module fields:
+- `_id`: string identifier for the module, like `mood-check`
+- `name`: human-readable module name
+- `entryQuestionId`: the question where the module begins
+- `questions`: embedded array of `QuestionSchema`
+
+Line 31:
+`{ timestamps: true }`
+Adds `createdAt` and `updatedAt` automatically.
+
+Line 32:
+Ends `ModuleSchema`.
+
+Line 34:
+Defines a schema instance method named `findQuestion`.
+
+Line 35:
+Searches the module’s embedded `questions` array for a question with matching id. Returns that question or `null`.
+
+Line 36:
+Ends the method.
+
+Line 38:
+Exports the Mongoose model named `Module`.
+
+========================================================================
+4. FILE: Backend/src/models/UserState.js
+========================================================================
+
+Line 1:
+Imports `mongoose`.
+
+Line 3:
+Begins the schema for per-user, per-module state.
+
+Lines 4-10:
+Define fields:
+- `userId`: which user this state belongs to
+- `moduleId`: which module this state belongs to
+- `currentQuestionId`: current active question to be answered next
+- `checkpointQuestionId`: latest checkpoint passed
+- `questionStack`: array used for back navigation
+
+Line 11:
+`{ timestamps: true }`
+Adds automatic `createdAt` and `updatedAt`.
+
+Line 12:
+Ends the schema.
+
+Line 14:
+Creates a unique compound index across `userId` and `moduleId`.
+This guarantees there is only one state row per user per module.
+
+Line 16:
+Exports the model named `UserState`.
+
+========================================================================
+5. FILE: Backend/src/models/ConversationHistory.js
+========================================================================
+
+Line 1:
+Imports `mongoose`.
+
+Line 3:
+Begins the history schema.
+
+Lines 4-11:
+Define history fields:
+- `userId`: the user who answered
+- `moduleId`: the module where the answer happened
+- `questionId`: the question id
+- `questionText`: question text saved at answer time
+- `selectedOptionId`: chosen option id
+- `selectedOptionText`: chosen option text saved at answer time
+
+Line 5:
+`index: true` on `userId`
+Adds a simple index because history is often queried by user.
+
+Line 12:
+Adds timestamps so each history row records when the answer happened.
+
+Line 13:
+Ends the schema.
+
+Line 15:
+Creates a compound index on `userId`, `moduleId`, and `createdAt`.
+This helps history queries and ordering inside a module.
+
+Line 17:
+Exports the model named `ConversationHistory`.
+
+========================================================================
+6. FILE: Backend/tests/setup.js
+========================================================================
+
+Line 1:
+Imports `mongoose`.
+
+Line 2:
+Imports `MongoMemoryServer`, which spins up an in-memory MongoDB instance for tests.
+
+Line 4:
+`let mongoServer;`
+Declares a variable that will hold the in-memory server instance.
+
+Line 6:
+`beforeAll(async () => {`
+Jest runs this once before all test cases.
+
+Lines 7-11:
+Create the in-memory MongoDB server.
+The `ip: '127.0.0.1'` part tries to force a loopback bind address instead of a broader network address.
+
+Line 12:
+Connects Mongoose to the URI provided by the in-memory MongoDB server.
+
+Line 13:
+Ends `beforeAll`.
+
+Line 15:
+`afterEach(async () => {`
+Jest runs this after every individual test.
+
+Line 16:
+`const collections = mongoose.connection.collections;`
+Gets every collection currently created in the test database.
+
+Line 18:
+`for (const key in collections) {`
+Starts iterating through all collection names.
+
+Line 19:
+`await collections[key].deleteMany({});`
+Deletes all documents from that collection so the next test starts clean.
+
+Line 20:
+Ends the loop.
+
+Line 21:
+Ends `afterEach`.
+
+Line 23:
+`afterAll(async () => {`
+Jest runs this once after all tests finish.
+
+Line 24:
+Disconnects Mongoose from the in-memory database.
+
+Line 25:
+Stops the in-memory MongoDB process.
+
+Line 26:
+Ends `afterAll`.
+
+========================================================================
+7. FILE: Backend/tests/flow.test.js
+========================================================================
+
+Line 1:
+Imports `supertest`, which lets tests send HTTP requests directly to the Express app.
+
+Line 3:
+Imports the Express app.
+
+Lines 4-6:
+Import the Mongoose models used in tests for direct database setup and assertions.
+
+Line 8:
+`async function seedModules() {`
+Declares a helper that inserts sample module data before many test cases.
+
+Line 9:
+`await Module.create([`
+Creates two module documents in MongoDB.
+
+Lines 10-42:
+Define module `mod-a`.
+- `_id: 'mod-a'`
+- `entryQuestionId: 'a1'`
+- three questions: `a1`, `a2`, `a3`
+- `a1-opt1` moves within module to `a2`
+- `a1-opt2` switches to module `mod-b`
+- `a2` is a checkpoint
+- `a3-opt1` finishes the module
+
+Lines 43-69:
+Define module `mod-b`.
+- `_id: 'mod-b'`
+- `entryQuestionId: 'b1'`
+- `b1-opt1` moves to `b2`
+- `b1-opt2` switches back to `mod-a` at `a3`
+- `b2-opt1` finishes the module
+
+Line 70:
+Closes `Module.create`.
+
+Line 71:
+Ends `seedModules`.
+
+Lines 73-91:
+`describe('Module seeding', ... )`
+Groups tests about module creation.
+
+Line 74:
+Starts a test case verifying the `POST /api/modules` route.
+
+Lines 75-86:
+Sends a POST request with a minimal module payload.
+
+Lines 88-89:
+Asserts:
+- response status is 201
+- returned module id is `test-mod`
+
+Lines 93-122:
+`describe('Starting a module', ... )`
+Groups tests for starting/resuming modules.
+
+Line 94:
+`beforeEach(seedModules);`
+Before every test in this block, insert the sample module data.
+
+Lines 96-101:
+Tests a fresh user starting a module.
+Expectation: first question should be `a1`.
+
+Lines 103-116:
+Creates a saved `UserState` manually, then calls the start endpoint.
+Expectation: resumed question should be `a2`, not the entry question.
+
+Lines 118-120:
+Tests validation for missing `userId`.
+Expectation: HTTP 400.
+
+Lines 124-194:
+`describe('Answering questions', ... )`
+Groups tests around answer submission.
+
+Lines 127-138:
+Tests normal same-module progression.
+Start module `mod-a`, answer `a1` with `a1-opt1`, expect next question `a2`.
+
+Lines 141-152:
+Tests that answering a question creates a history row.
+Then reads `ConversationHistory` directly from the DB and asserts one row exists with the right question and option ids.
+
+Lines 155-175:
+Tests end-of-module behavior.
+Answer through `a1 -> a2 -> a3`, then expect the final response to include `flowComplete: true`.
+
+Lines 177-193:
+Tests stale answer rejection.
+After answering `a1` once, tries to answer `a1` again.
+Because the active question has moved on, the API should reject this with HTTP 409.
+
+Lines 196-233:
+`describe('Checkpoint and deep link handling', ... )`
+Groups tests for checkpoints and old deep links.
+
+Lines 199-214:
+Answers through a checkpoint question and then reads `UserState`.
+Expectation: `checkpointQuestionId` should become `a2`.
+
+Lines 216-232:
+Creates a state where current question is `a3` and checkpoint is `a2`.
+Then requests an old deep link to `a1`.
+Expectation:
+- request succeeds
+- `staleLinkResolved` is true
+- returned question is the current valid one, `a3`
+
+Lines 235-293:
+`describe('Module switching and history', ... )`
+Groups tests around moving between modules.
+
+Lines 238-251:
+Tests switching from `mod-a` to `mod-b` via option `a1-opt2`.
+Expectation:
+- response status 200
+- response module id is `mod-b`
+- question is `b1`
+- `switchedModule` is true
+
+Lines 253-270:
+Tests complete history across modules.
+The user answers once in `mod-a`, then once in `mod-b`, then requests history.
+Expectation: total count is 2.
+
+Lines 272-292:
+Tests returning to an already visited module.
+Creates a saved state in `mod-a` at `a3`, starts `mod-b`, then chooses the option that switches back to `mod-a`.
+Expectation: returned question is the preserved `a3`, not a fresh entry question.
+
+Lines 295-395:
+`describe('Validation and back navigation', ... )`
+Groups invalid-input and bonus back-feature tests.
+
+Lines 298-309:
+Tests invalid option handling.
+Submitting `invalid-option` for question `a1` should return HTTP 400.
+
+Lines 311-325:
+Tests one-step back navigation.
+After answering `a1`, calling `/back` should return the previous question `a1`.
+
+Lines 327-344:
+Tests repeated back behavior.
+After going back once, a second back call should fail with HTTP 400 because the stack is empty.
+
+Lines 346-369:
+Tests checkpoint reset behavior.
+After answering through checkpoint `a2`, a back call should only return to `a2`, and another back should be blocked.
+This confirms that checkpoint logic resets prior context for future flow.
+
+Lines 371-394:
+Tests completed-module re-entry.
+After finishing the whole module, calling the start endpoint again should not restart it automatically.
+Expectation:
+- status 200
+- `flowComplete` is true
+- `question` is null
+
+Line 395:
+Closes the final `describe` block and ends the file.
+
+========================================================================
+8. BIG-PICTURE SUMMARY
+========================================================================
+
+The services layer contains the business logic:
+- validating modules, questions, and options
+- moving users through flows
+- switching modules
+- preserving history
+- enforcing active state
+- handling checkpoints
+- implementing back navigation
+
+The models layer defines how data is stored:
+- `Module` stores the flow graph
+- `UserState` stores current active position in a module
+- `ConversationHistory` stores permanent answer history
+
+The tests prove that the assignment behaviors work:
+- starting modules
+- answering questions
+- switching modules
+- stale links
+- checkpoints
+- defensive validation
+- history preservation
+- bonus back navigation
+- completed flow handling
+
