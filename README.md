@@ -29,13 +29,13 @@ npm install
 
 ```bash
 cp .env.example .env
-# Edit .env if your MongoDB URI differs from the default
+# Add MONGO_URI to .env only if you want to use a non-default MongoDB connection string
 ```
 
 By default the app tries `mongodb://localhost:27017/wysa-flow`.
 
 - If local MongoDB is running, it will use that.
-- If local MongoDB is not running and `MONGO_URI` is not set, the app falls back to an in-memory MongoDB instance for local development.
+- If local MongoDB is not running and you have not provided a custom `MONGO_URI`, the app falls back to an in-memory MongoDB instance for local development.
 - Set `USE_IN_MEMORY_DB=false` if you want startup to fail instead of using the fallback.
 
 ### Seed sample data

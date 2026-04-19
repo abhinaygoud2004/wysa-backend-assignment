@@ -7,7 +7,7 @@ let memoryServer;
 
 function shouldUseMemoryDatabaseFallback(error, mongoUri) {
   const isDefaultLocalUri = mongoUri === DEFAULT_MONGO_URI;
-  const hasExplicitMongoUri = Boolean(process.env.MONGO_URI);
+  const hasCustomMongoUri = Boolean(process.env.MONGO_URI) && process.env.MONGO_URI !== DEFAULT_MONGO_URI;
   const fallbackEnabled = process.env.USE_IN_MEMORY_DB !== 'false';
   const isLocalConnectionFailure =
     error?.name === 'MongooseServerSelectionError' &&
@@ -15,7 +15,7 @@ function shouldUseMemoryDatabaseFallback(error, mongoUri) {
       String(error?.message || '')
     );
 
-  return isDefaultLocalUri && !hasExplicitMongoUri && fallbackEnabled && isLocalConnectionFailure;
+  return isDefaultLocalUri && !hasCustomMongoUri && fallbackEnabled && isLocalConnectionFailure;
 }
 
 async function connectToMemoryDatabase() {
@@ -64,4 +64,5 @@ module.exports = {
   connectDatabase,
   disconnectDatabase,
   DEFAULT_MONGO_URI,
+  shouldUseMemoryDatabaseFallback,
 };
